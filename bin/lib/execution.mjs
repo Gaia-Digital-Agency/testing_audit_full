@@ -2,8 +2,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { absoluteUrl, dedupeStrings, runCommand, sameOrigin } from "./utils.mjs";
 
-function makeFinding(severity, area, title, details, route) {
-  return { severity, area, title, details, route };
+function makeFinding(severity, area, title, details, route, source) {
+  return { severity, area, title, details, route, browser: null, source: source || null };
+}
+
+function makeBrowserFinding(severity, area, title, details, route, browser, source) {
+  return { severity, area, title, details, route, browser, source: source || null };
 }
 
 async function discoverRoutesWithPlaywright(playwright, run, profile) {
@@ -213,6 +217,7 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
       let formCount = 0;
       let buttonCount = 0;
       let brokenImages = 0;
+      let brokenImageDetails = [];
       let hasHorizontalOverflow = false;
       let accessibilityViolations = 0;
 
@@ -225,12 +230,48 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
         title = await page.title();
         formCount = await page.locator("form").count();
         buttonCount = await page.locator("button, input[type='submit'], input[type='button']").count();
-        brokenImages = await page.$$eval("img", (images) => images.filter((image) => !image.complete || image.naturalWidth === 0).length);
+        const brokenImageDetails = await page.$$eval("img", (images) =>
+          images
+            .filter((image) => !image.complete || image.naturalWidth === 0)
+            .slice(0, 10)
+            .map((image) => ({
+              src: image.src || image.getAttribute("src") || "(empty)",
+              alt: image.alt || "(no alt)",
+              selector: image.id ? `#${image.id}` : image.className ? `img.${image.className.split(" ")[0]}` : `img[src="${(image.getAttribute("src") || "").slice(0, 80)}"]`
+            }))
+        );
+        brokenImages = brokenImageDetails.length;
         hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
 
         if (selectedTools.includes("axe-core")) {
           const axeResult = await new AxeBuilder({ page }).analyze();
           accessibilityViolations = axeResult.violations.length;
+
+          for (const violation of axeResult.violations) {
+            const nodes = violation.nodes.slice(0, 5).map((node) => ({
+              selector: node.target.join(" > "),
+              html: (node.html || "").slice(0, 200),
+              failureSummary: (node.failureSummary || "").slice(0, 200)
+            }));
+            combined.findings.push(
+              makeBrowserFinding(
+                violation.impact === "critical" ? "critical" : violation.impact === "serious" ? "high" : "medium",
+                "accessibility",
+                `${violation.id}: ${violation.help}`,
+                violation.description,
+                route,
+                project.name,
+                {
+                  type: "axe-rule",
+                  ruleId: violation.id,
+                  impact: violation.impact,
+                  wcagTags: violation.tags.filter((t) => t.startsWith("wcag") || t.startsWith("best-practice")),
+                  helpUrl: violation.helpUrl,
+                  nodes
+                }
+              )
+            );
+          }
         }
 
         const screenshotName = `${project.name}-${routes.indexOf(route) + 1}.png`;
@@ -259,43 +300,55 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
 
       if (responseStatus && responseStatus >= 400) {
         combined.findings.push(
-          makeFinding("critical", "availability", "Route returned an error status", `HTTP ${responseStatus}`, route)
+          makeBrowserFinding("critical", "availability", "Route returned an error status", `HTTP ${responseStatus}`, route, project.name, {
+            type: "http-error",
+            statusCode: responseStatus
+          })
         );
       }
 
       if (consoleErrors.length > 0) {
-        combined.findings.push(
-          makeFinding("high", "runtime", "Console errors were detected", `${consoleErrors.length} console error(s) captured during page flow.`, route)
-        );
+        for (const errorText of consoleErrors.slice(0, 10)) {
+          combined.findings.push(
+            makeBrowserFinding("high", "runtime", "Console error", errorText.slice(0, 500), route, project.name, {
+              type: "console-error",
+              message: errorText.slice(0, 500)
+            })
+          );
+        }
       }
 
       if (failedRequests.length > 0) {
-        combined.findings.push(
-          makeFinding("high", "network", "Failed requests were detected", `${failedRequests.length} request failure(s) captured during page flow.`, route)
-        );
+        for (const reqDetail of failedRequests.slice(0, 10)) {
+          combined.findings.push(
+            makeBrowserFinding("high", "network", "Failed network request", reqDetail, route, project.name, {
+              type: "network-failure",
+              request: reqDetail
+            })
+          );
+        }
       }
 
-      if (brokenImages > 0) {
-        combined.findings.push(
-          makeFinding("medium", "assets", "Broken images were detected", `${brokenImages} image(s) did not load correctly.`, route)
-        );
+      if (brokenImageDetails.length > 0) {
+        for (const img of brokenImageDetails.slice(0, 10)) {
+          combined.findings.push(
+            makeBrowserFinding("medium", "assets", "Broken image", `Image failed to load: ${img.src}`, route, project.name, {
+              type: "broken-image",
+              selector: img.selector,
+              src: img.src,
+              alt: img.alt
+            })
+          );
+        }
       }
 
       if (hasHorizontalOverflow) {
         combined.findings.push(
-          makeFinding("medium", "responsive-layout", "Horizontal overflow detected", "The page width exceeds the viewport, which often indicates layout breakage.", route)
-        );
-      }
-
-      if (accessibilityViolations > 0) {
-        combined.findings.push(
-          makeFinding(
-            "medium",
-            "accessibility",
-            "Accessibility violations were detected",
-            `${accessibilityViolations} accessibility rule violation(s) were found in the rendered page.`,
-            route
-          )
+          makeBrowserFinding("medium", "responsive-layout", "Horizontal overflow detected", "The page width exceeds the viewport, which often indicates layout breakage.", route, project.name, {
+            type: "layout-overflow",
+            scrollWidth: null,
+            viewportWidth: null
+          })
         );
       }
 

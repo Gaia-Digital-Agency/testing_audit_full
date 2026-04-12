@@ -92,71 +92,130 @@ export function renderOkReport(run) {
 }
 
 // ── Errors-Only Report ──────────────────────────────────────────────────
+function renderSourceBlock(source) {
+  if (!source) return [];
+  const lines = [];
+
+  if (source.type === "axe-rule") {
+    lines.push(`- **Rule**: \`${source.ruleId}\` (${source.impact})`);
+    if (source.wcagTags && source.wcagTags.length > 0) {
+      lines.push(`- **WCAG**: ${source.wcagTags.join(", ")}`);
+    }
+    if (source.helpUrl) {
+      lines.push(`- **Reference**: ${source.helpUrl}`);
+    }
+    if (source.nodes && source.nodes.length > 0) {
+      lines.push("- **Affected elements**:");
+      for (const node of source.nodes) {
+        lines.push(`  - Selector: \`${node.selector}\``);
+        if (node.html) lines.push(`    HTML: \`${node.html}\``);
+        if (node.failureSummary) lines.push(`    Fix: ${node.failureSummary}`);
+      }
+    }
+  } else if (source.type === "console-error") {
+    lines.push(`- **Console message**: \`${source.message}\``);
+  } else if (source.type === "network-failure") {
+    lines.push(`- **Failed request**: \`${source.request}\``);
+  } else if (source.type === "broken-image") {
+    lines.push(`- **Image src**: \`${source.src}\``);
+    lines.push(`- **Selector**: \`${source.selector}\``);
+    if (source.alt) lines.push(`- **Alt text**: ${source.alt}`);
+  } else if (source.type === "http-error") {
+    lines.push(`- **HTTP status**: ${source.statusCode}`);
+  } else if (source.type === "layout-overflow") {
+    lines.push(`- **Issue**: Document scroll width exceeds viewport`);
+  }
+
+  return lines;
+}
+
 export function renderErrorsReport(run) {
   const errorSeverities = new Set(["critical", "high", "medium", "low"]);
   const errorFindings = [...run.findings]
     .filter((f) => errorSeverities.has(f.severity))
     .sort((a, b) => {
       const rank = { critical: 0, high: 1, medium: 2, low: 3 };
-      return rank[a.severity] - rank[b.severity];
+      return (rank[a.severity] - rank[b.severity]) || (a.route || "").localeCompare(b.route || "");
     });
-  const errorRoutes = run.routeSummaries.filter(
-    (r) =>
-      r.consoleErrors > 0 ||
-      r.failedRequests > 0 ||
-      r.brokenImages > 0 ||
-      r.horizontalOverflow ||
-      r.accessibilityViolations > 0 ||
-      (r.responseStatus !== null && r.responseStatus >= 400)
-  );
 
-  return [
+  // Group findings by URL
+  const byRoute = new Map();
+  for (const f of errorFindings) {
+    const key = f.route || "(no route)";
+    if (!byRoute.has(key)) byRoute.set(key, []);
+    byRoute.get(key).push(f);
+  }
+
+  // Severity counts
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const f of errorFindings) counts[f.severity] += 1;
+
+  const lines = [
     `# ${run.projectName} — Errors Report`,
     "",
-    `- Mode: \`${run.mode}\``,
-    `- Base URL: ${run.baseUrl}`,
-    `- Started: ${run.startedAt}`,
-    `- Completed: ${run.completedAt}`,
+    `| Field | Value |`,
+    `|---|---|`,
+    `| Mode | \`${run.mode}\` |`,
+    `| Base URL | ${run.baseUrl} |`,
+    `| Started | ${run.startedAt} |`,
+    `| Completed | ${run.completedAt} |`,
+    "",
+    "---",
     "",
     "## Error Summary",
     "",
-    `- Total findings: ${errorFindings.length}`,
-    `- Critical: ${errorFindings.filter((f) => f.severity === "critical").length}`,
-    `- High: ${errorFindings.filter((f) => f.severity === "high").length}`,
-    `- Medium: ${errorFindings.filter((f) => f.severity === "medium").length}`,
-    `- Low: ${errorFindings.filter((f) => f.severity === "low").length}`,
+    "| Severity | Count |",
+    "|---|---|",
+    `| CRITICAL | ${counts.critical} |`,
+    `| HIGH | ${counts.high} |`,
+    `| MEDIUM | ${counts.medium} |`,
+    `| LOW | ${counts.low} |`,
+    `| **Total** | **${errorFindings.length}** |`,
     "",
-    "## Findings",
-    "",
-    ...(errorFindings.length === 0
-      ? ["- No errors found. All checks passed."]
-      : errorFindings.flatMap((f) => [
-          `### [${f.severity.toUpperCase()}] ${f.area}: ${f.title}`,
-          "",
-          `- **URL**: ${f.route || "N/A"}`,
-          `- **Component/Area**: ${f.area}`,
-          `- **Details**: ${f.details}`,
-          ""
-        ])),
-    "## Routes With Errors",
-    "",
-    ...(errorRoutes.length === 0
-      ? ["- No routes had errors."]
-      : errorRoutes.flatMap((r) => {
-          const issues = [];
-          if (r.responseStatus !== null && r.responseStatus >= 400) issues.push(`HTTP ${r.responseStatus}`);
-          if (r.consoleErrors > 0) issues.push(`${r.consoleErrors} console error(s)`);
-          if (r.failedRequests > 0) issues.push(`${r.failedRequests} failed request(s)`);
-          if (r.brokenImages > 0) issues.push(`${r.brokenImages} broken image(s)`);
-          if (r.horizontalOverflow) issues.push("horizontal overflow");
-          if (r.accessibilityViolations > 0) issues.push(`${r.accessibilityViolations} a11y violation(s)`);
-          return [
-            `- **${r.route}** (${r.browserProject})`,
-            `  Issues: ${issues.join(", ")}`,
-          ];
-        })),
-    ""
-  ].join("\n");
+  ];
+
+  if (errorFindings.length === 0) {
+    lines.push("**No errors found. All checks passed.**", "");
+    return lines.join("\n");
+  }
+
+  lines.push("---", "");
+
+  // Render grouped by URL
+  for (const [route, findings] of byRoute) {
+    lines.push(`## ${route}`, "");
+
+    for (const f of findings) {
+      const browserTag = f.browser ? ` [${f.browser}]` : "";
+      lines.push(`### ${severityBadge(f.severity)} ${f.area}: ${f.title}${browserTag}`, "");
+      lines.push(`${f.details}`, "");
+      lines.push(...renderSourceBlock(f.source));
+      lines.push("");
+    }
+  }
+
+  // Quick-scan table at the end
+  lines.push("---", "", "## Quick Scan Table", "");
+  lines.push("| Severity | Area | Issue | URL | Browser | Source |");
+  lines.push("|---|---|---|---|---|---|");
+  for (const f of errorFindings) {
+    const src = f.source
+      ? f.source.type === "axe-rule" ? `\`${f.source.ruleId}\`` :
+        f.source.type === "broken-image" ? `\`${f.source.src.slice(0, 60)}\`` :
+        f.source.type === "console-error" ? `\`${f.source.message.slice(0, 60)}\`` :
+        f.source.type === "network-failure" ? `\`${f.source.request.slice(0, 60)}\`` :
+        f.source.type || ""
+      : "";
+    lines.push(`| ${f.severity.toUpperCase()} | ${f.area} | ${f.title.slice(0, 50)} | ${f.route || "N/A"} | ${f.browser || "all"} | ${src} |`);
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function severityBadge(severity) {
+  const badges = { critical: "🔴 CRITICAL", high: "🟠 HIGH", medium: "🟡 MEDIUM", low: "🔵 LOW" };
+  return badges[severity] || severity.toUpperCase();
 }
 
 // ── Full Report ─────────────────────────────────────────────────────────
@@ -253,10 +312,18 @@ export function renderReport(run) {
     "",
     ...(sortedFindings.length === 0
       ? ["- No findings recorded."]
-      : sortedFindings.flatMap((finding) => [
-          `- [${finding.severity.toUpperCase()}] ${finding.area}: ${finding.title}${finding.route ? ` (${finding.route})` : ""}`,
-          `  ${finding.details}`
-        ])),
+      : sortedFindings.flatMap((finding) => {
+          const browserTag = finding.browser ? ` [${finding.browser}]` : "";
+          const lines = [
+            `### [${finding.severity.toUpperCase()}] ${finding.area}: ${finding.title}${browserTag}`,
+            "",
+            `- **URL**: ${finding.route || "N/A"}`,
+            `- **Details**: ${finding.details}`,
+          ];
+          lines.push(...renderSourceBlock(finding.source));
+          lines.push("");
+          return lines;
+        })),
     "",
     "## Artifacts",
     "",
