@@ -85,32 +85,32 @@ function chooseTools(profile, mode) {
     if (tool.name === "playwright") {
       selected = true;
       reason = "Selected as the default execution backbone for all interactive and cross-browser checks.";
-    } else if (tool.name === "crawlee") {
-      selected = profile.needsDeepCrawl;
-      reason = selected
-        ? "Selected to discover routes, subpages, and internal links for broad coverage."
-        : "Available, but not necessary when the run is limited to critical-path smoke coverage.";
     } else if (tool.name === "axe-core") {
       selected = true;
       reason = "Selected to fold accessibility checks into rendered page flows instead of running a separate silo.";
     } else if (tool.name === "lighthouse") {
       selected = true;
       reason = "Selected to add performance and quality budgets on key pages within the combined audit pipeline.";
+    } else if (tool.name === "crawlee") {
+      selected = mode === "full" || profile.needsDeepCrawl;
+      reason = selected
+        ? "Selected to discover routes, subpages, and internal links for broad coverage."
+        : "Available, but not necessary when the run is limited to critical-path smoke coverage.";
+    } else if (tool.name === "puppeteer") {
+      selected = mode === "full" || profile.renderingMode === "mixed" || profile.likelyFrameworks.includes("Next.js");
+      reason = selected
+        ? "Selected for Chrome-specific instrumentation including JS/CSS coverage analysis."
+        : "Available, but not needed unless Chrome-specific instrumentation becomes necessary.";
+    } else if (tool.name === "selenium") {
+      selected = mode === "full" || profile.needsCompatibilityFallback;
+      reason = selected
+        ? "Selected for cross-browser compatibility validation."
+        : "Available, but held in reserve for legacy or remote-grid compatibility needs.";
     } else if (tool.name === "sitespeed.io") {
       selected = mode === "full";
       reason = selected
         ? "Selected to deepen performance profiling for the full run."
         : "Available, but deferred in smoke mode to keep runtime short.";
-    } else if (tool.name === "puppeteer") {
-      selected = profile.renderingMode === "mixed" || profile.likelyFrameworks.includes("Next.js");
-      reason = selected
-        ? "Selected as supplemental Chrome-specific instrumentation for a framework-heavy target."
-        : "Available, but not needed unless Chrome-specific instrumentation becomes necessary.";
-    } else if (tool.name === "selenium") {
-      selected = profile.needsCompatibilityFallback;
-      reason = selected
-        ? "Selected as a compatibility fallback."
-        : "Available, but held in reserve for legacy or remote-grid compatibility needs.";
     }
 
     return {
