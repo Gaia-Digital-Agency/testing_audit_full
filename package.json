@@ -1,0 +1,26 @@
+{
+  "name": "quality-tester",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-browser smoke and full quality tester for websites and web apps.",
+  "scripts": {
+    "app": "node ./bin/qatester.mjs",
+    "install:browsers": "npx playwright install chromium firefox webkit",
+    "test:smoke": "playwright test --config=playwright.config.ts --project=desktop-chromium tests/smoke",
+    "test:full": "playwright test --config=playwright.config.ts tests/full",
+    "report:sample": "node -e \"console.log('Report generation will be wired in implementation phase.')\""
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "chrome-launcher": "^1.1.2",
+    "crawlee": "^3.15.1",
+    "lighthouse": "^12.8.2",
+    "playwright": "^1.55.0",
+    "puppeteer": "^24.22.3",
+    "selenium-webdriver": "^4.36.0",
+    "sitespeed.io": "^39.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
