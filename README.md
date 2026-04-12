@@ -41,33 +41,27 @@ npm run app
 
 ## Input
 
-When you run `npm run app`, the CLI presents:
+When you run `npm run app`, the CLI asks 5 questions:
 
 ```
-═════════════════════════════════════════════════════���══
-  QUALITY TESTER — Run Configuration
-══════════════════════���═════════════════════════════════
+════════════════════════════════════════════════════════
+  QUALITY TESTER
+════════════════════════════════════════════════════════
 
-  Project name:              → Label for the run and report folder
-  External URL:              → Public URL of the target site (e.g. https://example.com)
-  SSH host:                  → Server hostname
-  SSH user:                  → SSH username
-  SSH project path:          → Path to project on the server
-  Auth username (optional):  → For sites behind login (leave blank to skip)
-  Auth password (optional):  → For sites behind login (leave blank to skip)
-  Mode (smoke/full):         → smoke = fast release gate, full = deep crawl audit
+  Project name           : essentialbali
+  URL                    : http://essentialbali.gaiada.online/
+  SSH command            : ssh azlan@gda-s01
+  Server project path    : /var/www/essentialbali
+  Mode (smoke / full)    : smoke
 ```
 
-| Prompt | Required | Description |
-|---|---|---|
-| Project name | Yes | Label for the run and report folder |
-| External URL | Yes | Public URL of the target site |
-| SSH host | Yes | Server hostname |
-| SSH user | Yes | SSH username |
-| SSH project path | Yes | Path to project on the server |
-| Auth username | No | For sites behind login |
-| Auth password | No | For sites behind login |
-| Mode | Yes | `smoke` (fast) or `full` (deep) |
+| # | Prompt | Example | Description |
+|---|---|---|---|
+| 1 | Project name | `essentialbali` | Label for run folder and reports |
+| 2 | URL | `http://example.com` | Public URL to test |
+| 3 | SSH command | `ssh azlan@gda-s01` | Your working SSH command (user@host parsed automatically) |
+| 4 | Server project path | `/var/www/mysite` | Path to project files on the server |
+| 5 | Mode | `smoke` or `full` | smoke = fast gate, full = deep crawl |
 
 ## Modes
 

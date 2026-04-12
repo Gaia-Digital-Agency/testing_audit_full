@@ -45,30 +45,45 @@ function makeProgressPrinter() {
   };
 }
 
+/**
+ * Parse SSH command string into components.
+ * Accepts formats:
+ *   ssh user@host
+ *   ssh host            (user defaults to current user)
+ *   user@host
+ *   host
+ *   ssh -i key user@host
+ */
+function parseSshCommand(raw) {
+  const cleaned = raw.replace(/^ssh\s+/i, "").replace(/-i\s+\S+\s*/g, "").trim();
+  if (cleaned.includes("@")) {
+    const [user, ...rest] = cleaned.split("@");
+    return { sshUser: user, sshHost: rest.join("@") };
+  }
+  return { sshUser: "", sshHost: cleaned };
+}
+
 async function promptForRun() {
   const rl = createInterface({ input, output });
 
   try {
     stdout.write("\n════════════════════════════════════════════════════════\n");
-    stdout.write("  QUALITY TESTER — Run Configuration\n");
+    stdout.write("  QUALITY TESTER\n");
     stdout.write("════════════════════════════════════════════════════════\n");
-    stdout.write("  Runtime  : Node.js (ESM) + Chromium/Firefox/WebKit\n");
-    stdout.write("  Tools    : Playwright, axe-core, Lighthouse, Crawlee,\n");
-    stdout.write("             sitespeed.io, Puppeteer, Selenium\n");
-    stdout.write("  Output   : report-full.md, report-ok.md,\n");
-    stdout.write("             report-errors.md, report-full.pdf,\n");
-    stdout.write("             screenshots/, lighthouse/\n");
+    stdout.write("  Runtime : Node.js + Chromium / Firefox / WebKit\n");
+    stdout.write("  Tools   : Playwright · axe-core · Lighthouse ·\n");
+    stdout.write("            Crawlee · sitespeed.io · Puppeteer ·\n");
+    stdout.write("            Selenium\n");
     stdout.write("════════════════════════════════════════════════════════\n\n");
 
-    const projectName = (await rl.question("  Project name: ")).trim();
-    const baseUrl = (await rl.question("  External URL: ")).trim();
-    const sshHost = (await rl.question("  SSH host: ")).trim();
-    const sshUser = (await rl.question("  SSH user: ")).trim();
-    const sshProjectPath = (await rl.question("  SSH project path: ")).trim();
-    const authUser = (await rl.question("  Auth username (optional): ")).trim();
-    const authPassword = (await rl.question("  Auth password (optional): ")).trim();
-    const modeInput = (await rl.question("  Mode (smoke/full): ")).trim().toLowerCase();
+    const projectName = (await rl.question("  Project name           : ")).trim();
+    const baseUrl = (await rl.question("  URL                    : ")).trim();
+    const sshCommand = (await rl.question("  SSH command            : ")).trim();
+    const sshProjectPath = (await rl.question("  Server project path    : ")).trim();
+    const modeInput = (await rl.question("  Mode (smoke / full)    : ")).trim().toLowerCase();
     const mode = modeInput === "full" ? "full" : "smoke";
+
+    const { sshUser, sshHost } = parseSshCommand(sshCommand);
 
     stdout.write("\n");
 
@@ -78,8 +93,9 @@ async function promptForRun() {
       sshHost,
       sshUser,
       sshProjectPath,
-      authUser,
-      authPassword,
+      sshCommand,
+      authUser: "",
+      authPassword: "",
       mode
     };
   } finally {
@@ -98,7 +114,7 @@ async function main() {
   // Create run directory early so tools can write artifacts into it
   await mkdir(runDir, { recursive: true });
 
-  const authSummary = run.authUser || run.authPassword ? `Provided for user ${run.authUser || "unknown"}` : "Not provided";
+  const authSummary = "Not applicable";
   const targetProfile = await enrichTargetProfile(run, profileTarget(run));
   const executionPlan = buildExecutionPlan(targetProfile, run.mode);
 

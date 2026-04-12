@@ -143,26 +143,62 @@ function renderSourceBlock(source) {
   return lines;
 }
 
+/**
+ * Deduplicate findings: same severity + area + title + route + source key
+ * merge across browsers into one entry listing all affected browsers.
+ */
+function deduplicateFindings(findings) {
+  const map = new Map();
+  for (const f of findings) {
+    const sourceKey = f.source
+      ? f.source.type === "axe-rule" ? f.source.ruleId :
+        f.source.type === "console-error" ? f.source.message :
+        f.source.type === "network-failure" ? f.source.request :
+        f.source.type === "broken-image" ? f.source.src :
+        f.source.type || ""
+      : "";
+    const key = `${f.severity}|${f.area}|${f.title}|${f.route || ""}|${sourceKey}`;
+    if (map.has(key)) {
+      const existing = map.get(key);
+      if (f.browser && !existing.browsers.includes(f.browser)) {
+        existing.browsers.push(f.browser);
+      }
+    } else {
+      map.set(key, { ...f, browsers: f.browser ? [f.browser] : ["all"] });
+    }
+  }
+  return [...map.values()];
+}
+
 export function renderErrorsReport(run) {
   const errorSeverities = new Set(["critical", "high", "medium", "low"]);
-  const errorFindings = [...run.findings]
+  const rawFindings = [...run.findings]
     .filter((f) => errorSeverities.has(f.severity))
     .sort((a, b) => {
       const rank = { critical: 0, high: 1, medium: 2, low: 3 };
       return (rank[a.severity] - rank[b.severity]) || (a.route || "").localeCompare(b.route || "");
     });
 
-  // Group findings by URL
+  const dedupedFindings = deduplicateFindings(rawFindings);
+
+  // Severity counts (deduplicated)
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const f of dedupedFindings) counts[f.severity] += 1;
+
+  // Category summary (deduplicated)
+  const byCat = new Map();
+  for (const f of dedupedFindings) {
+    byCat.set(f.area, (byCat.get(f.area) || 0) + 1);
+  }
+  const catEntries = [...byCat.entries()].sort((a, b) => b[1] - a[1]);
+
+  // Group by route (deduplicated)
   const byRoute = new Map();
-  for (const f of errorFindings) {
+  for (const f of dedupedFindings) {
     const key = f.route || "(no route)";
     if (!byRoute.has(key)) byRoute.set(key, []);
     byRoute.get(key).push(f);
   }
-
-  // Severity counts
-  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const f of errorFindings) counts[f.severity] += 1;
 
   const lines = [
     `# ${run.projectName} — Errors Report`,
@@ -170,57 +206,65 @@ export function renderErrorsReport(run) {
     `| Field | Value |`,
     `|---|---|`,
     `| Mode | \`${run.mode}\` |`,
-    `| Base URL | ${run.baseUrl} |`,
+    `| URL | ${run.baseUrl} |`,
     `| Started | ${run.startedAt} |`,
     `| Completed | ${run.completedAt} |`,
+    `| Raw findings | ${rawFindings.length} (before dedup across browsers) |`,
+    `| Unique issues | **${dedupedFindings.length}** |`,
     "",
     "---",
     "",
-    "## Error Summary",
+    "## Severity Summary",
     "",
     "| Severity | Count |",
     "|---|---|",
-    `| CRITICAL | ${counts.critical} |`,
-    `| HIGH | ${counts.high} |`,
-    `| MEDIUM | ${counts.medium} |`,
-    `| LOW | ${counts.low} |`,
-    `| **Total** | **${errorFindings.length}** |`,
+    `| 🔴 CRITICAL | ${counts.critical} |`,
+    `| 🟠 HIGH | ${counts.high} |`,
+    `| 🟡 MEDIUM | ${counts.medium} |`,
+    `| 🔵 LOW | ${counts.low} |`,
+    "",
+    "## Category Summary",
+    "",
+    "| Category | Issues |",
+    "|---|---|",
+    ...catEntries.map(([cat, count]) => `| ${cat} | ${count} |`),
     "",
   ];
 
-  if (errorFindings.length === 0) {
+  if (dedupedFindings.length === 0) {
     lines.push("**No errors found. All checks passed.**", "");
     return lines.join("\n");
   }
 
-  lines.push("---", "");
-
   // Render grouped by URL
   for (const [route, findings] of byRoute) {
-    lines.push(`## ${route}`, "");
+    lines.push("---", "", `## ${route}`, "");
 
     for (const f of findings) {
-      const browserTag = f.browser ? ` [${f.browser}]` : "";
-      lines.push(`### ${severityBadge(f.severity)} ${f.area}: ${f.title}${browserTag}`, "");
-      lines.push(`${f.details}`, "");
+      const browserList = f.browsers.join(", ");
+      lines.push(`### ${severityBadge(f.severity)} ${f.area}: ${f.title}`, "");
+      lines.push(`- **Browsers**: ${browserList}`);
+      lines.push(`- **Details**: ${f.details}`);
       lines.push(...renderSourceBlock(f.source));
       lines.push("");
     }
   }
 
-  // Quick-scan table at the end
+  // Quick-scan table (deduplicated)
   lines.push("---", "", "## Quick Scan Table", "");
-  lines.push("| Severity | Area | Issue | URL | Browser | Source |");
-  lines.push("|---|---|---|---|---|---|");
-  for (const f of errorFindings) {
+  lines.push("| # | Severity | Category | Issue | URL | Browsers | Source |");
+  lines.push("|---|---|---|---|---|---|---|");
+  let idx = 0;
+  for (const f of dedupedFindings) {
+    idx += 1;
     const src = f.source
       ? f.source.type === "axe-rule" ? `\`${f.source.ruleId}\`` :
-        f.source.type === "broken-image" ? `\`${f.source.src.slice(0, 60)}\`` :
-        f.source.type === "console-error" ? `\`${f.source.message.slice(0, 60)}\`` :
-        f.source.type === "network-failure" ? `\`${f.source.request.slice(0, 60)}\`` :
+        f.source.type === "broken-image" ? `\`${(f.source.src || "").slice(0, 50)}\`` :
+        f.source.type === "console-error" ? `\`${(f.source.message || "").slice(0, 50)}\`` :
+        f.source.type === "network-failure" ? `\`${(f.source.request || "").slice(0, 50)}\`` :
         f.source.type || ""
       : "";
-    lines.push(`| ${f.severity.toUpperCase()} | ${f.area} | ${f.title.slice(0, 50)} | ${f.route || "N/A"} | ${f.browser || "all"} | ${src} |`);
+    lines.push(`| ${idx} | ${f.severity.toUpperCase()} | ${f.area} | ${f.title.slice(0, 45)} | ${f.route || "N/A"} | ${f.browsers.join(", ")} | ${src} |`);
   }
   lines.push("");
 
@@ -244,21 +288,18 @@ export function renderReport(run) {
     `# ${run.projectName} Quality Report`,
     "",
     `- Mode: \`${run.mode}\``,
-    `- Base URL: ${run.baseUrl}`,
-    `- SSH Target: ${run.sshUser}@${run.sshHost}:${run.sshProjectPath}`,
-    `- Auth Input: ${run.authSummary}`,
+    `- URL: ${run.baseUrl}`,
+    `- SSH: ${run.sshCommand || `${run.sshUser}@${run.sshHost}`}`,
+    `- Server path: ${run.sshProjectPath}`,
     `- Started: ${run.startedAt}`,
     `- Completed: ${run.completedAt}`,
     "",
     "## Run Input",
     "",
     `- Project Name: ${run.projectName}`,
-    `- External URL: ${run.baseUrl}`,
-    `- SSH Host: ${run.sshHost}`,
-    `- SSH User: ${run.sshUser}`,
-    `- SSH Project Path: ${run.sshProjectPath}`,
-    `- Auth Username: ${run.authUser || "Not provided"}`,
-    `- Auth Password: ${run.authPassword ? "[REDACTED]" : "Not provided"}`,
+    `- URL: ${run.baseUrl}`,
+    `- SSH: ${run.sshCommand || `${run.sshUser}@${run.sshHost}`}`,
+    `- Server Path: ${run.sshProjectPath}`,
     "",
     "## Detected Target Profile",
     "",
