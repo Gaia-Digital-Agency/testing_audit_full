@@ -220,6 +220,7 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
       let brokenImageDetails = [];
       let hasHorizontalOverflow = false;
       let accessibilityViolations = 0;
+      let viewportMetrics = null;
 
       try {
         const response = await page.goto(route, {
@@ -230,7 +231,7 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
         title = await page.title();
         formCount = await page.locator("form").count();
         buttonCount = await page.locator("button, input[type='submit'], input[type='button']").count();
-        const brokenImageDetails = await page.$$eval("img", (images) =>
+        brokenImageDetails = await page.$$eval("img", (images) =>
           images
             .filter((image) => !image.complete || image.naturalWidth === 0)
             .slice(0, 10)
@@ -241,7 +242,95 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
             }))
         );
         brokenImages = brokenImageDetails.length;
-        hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+
+        // Viewport and responsive layout checks
+        viewportMetrics = await page.evaluate(() => {
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          const scrollW = document.documentElement.scrollWidth;
+          const scrollH = document.documentElement.scrollHeight;
+          const hasOverflow = scrollW > vw + 1;
+
+          // Detect elements overflowing viewport
+          const overflowingElements = [];
+          const all = document.querySelectorAll("*");
+          for (let i = 0; i < all.length && overflowingElements.length < 5; i++) {
+            const rect = all[i].getBoundingClientRect();
+            if (rect.right > vw + 2 && rect.width > 0) {
+              const tag = all[i].tagName.toLowerCase();
+              const id = all[i].id ? `#${all[i].id}` : "";
+              const cls = all[i].className && typeof all[i].className === "string" ? `.${all[i].className.split(" ")[0]}` : "";
+              overflowingElements.push({
+                selector: `${tag}${id}${cls}`,
+                overflowPx: Math.round(rect.right - vw),
+                width: Math.round(rect.width)
+              });
+            }
+          }
+
+          // Detect text truncation (elements with overflow hidden and text overflowing)
+          const truncatedText = [];
+          const textEls = document.querySelectorAll("p, span, h1, h2, h3, h4, h5, h6, a, li, td, th, label, button");
+          for (let i = 0; i < textEls.length && truncatedText.length < 5; i++) {
+            const el = textEls[i];
+            const style = window.getComputedStyle(el);
+            if (style.overflow === "hidden" && el.scrollWidth > el.clientWidth + 2) {
+              const tag = el.tagName.toLowerCase();
+              const id = el.id ? `#${el.id}` : "";
+              const cls = el.className && typeof el.className === "string" ? `.${el.className.split(" ")[0]}` : "";
+              truncatedText.push({
+                selector: `${tag}${id}${cls}`,
+                visibleWidth: el.clientWidth,
+                contentWidth: el.scrollWidth,
+                textPreview: (el.textContent || "").slice(0, 80)
+              });
+            }
+          }
+
+          // Check tap target sizes (mobile: buttons/links should be >= 44x44)
+          const smallTapTargets = [];
+          if (vw <= 480) {
+            const tappable = document.querySelectorAll("a, button, input, select, textarea, [role='button']");
+            for (let i = 0; i < tappable.length && smallTapTargets.length < 5; i++) {
+              const rect = tappable[i].getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0 && (rect.width < 44 || rect.height < 44)) {
+                const tag = tappable[i].tagName.toLowerCase();
+                const id = tappable[i].id ? `#${tappable[i].id}` : "";
+                const cls = tappable[i].className && typeof tappable[i].className === "string" ? `.${tappable[i].className.split(" ")[0]}` : "";
+                smallTapTargets.push({
+                  selector: `${tag}${id}${cls}`,
+                  width: Math.round(rect.width),
+                  height: Math.round(rect.height),
+                  text: (tappable[i].textContent || "").slice(0, 40)
+                });
+              }
+            }
+          }
+
+          // Font size check (mobile: body text should be >= 12px)
+          let smallFontCount = 0;
+          if (vw <= 480) {
+            const readable = document.querySelectorAll("p, span, li, td, th, label, a");
+            for (const el of readable) {
+              const fs = parseFloat(window.getComputedStyle(el).fontSize);
+              if (fs > 0 && fs < 12) smallFontCount++;
+            }
+          }
+
+          return {
+            viewportWidth: vw,
+            viewportHeight: vh,
+            scrollWidth: scrollW,
+            scrollHeight: scrollH,
+            hasOverflow,
+            overflowingElements,
+            truncatedText,
+            smallTapTargets,
+            smallFontCount,
+            isMobile: vw <= 480
+          };
+        });
+        hasHorizontalOverflow = viewportMetrics.hasOverflow;
 
         if (selectedTools.includes("axe-core")) {
           const axeResult = await new AxeBuilder({ page }).analyze();
@@ -342,12 +431,48 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
         }
       }
 
-      if (hasHorizontalOverflow) {
+      if (hasHorizontalOverflow && viewportMetrics) {
         combined.findings.push(
-          makeBrowserFinding("medium", "responsive-layout", "Horizontal overflow detected", "The page width exceeds the viewport, which often indicates layout breakage.", route, project.name, {
+          makeBrowserFinding("medium", "responsive-layout", "Horizontal overflow detected", `Page scroll width (${viewportMetrics.scrollWidth}px) exceeds viewport (${viewportMetrics.viewportWidth}px) by ${viewportMetrics.scrollWidth - viewportMetrics.viewportWidth}px.`, route, project.name, {
             type: "layout-overflow",
-            scrollWidth: null,
-            viewportWidth: null
+            scrollWidth: viewportMetrics.scrollWidth,
+            viewportWidth: viewportMetrics.viewportWidth,
+            overflowingElements: viewportMetrics.overflowingElements
+          })
+        );
+      }
+
+      if (viewportMetrics && viewportMetrics.truncatedText.length > 0) {
+        for (const item of viewportMetrics.truncatedText) {
+          combined.findings.push(
+            makeBrowserFinding("medium", "responsive-layout", "Text truncated by overflow:hidden", `Text content is wider (${item.contentWidth}px) than container (${item.visibleWidth}px). Preview: "${item.textPreview}"`, route, project.name, {
+              type: "text-truncation",
+              selector: item.selector,
+              visibleWidth: item.visibleWidth,
+              contentWidth: item.contentWidth
+            })
+          );
+        }
+      }
+
+      if (viewportMetrics && viewportMetrics.smallTapTargets.length > 0) {
+        for (const item of viewportMetrics.smallTapTargets) {
+          combined.findings.push(
+            makeBrowserFinding("medium", "responsive-layout", "Tap target too small for mobile", `Element "${item.text || item.selector}" is ${item.width}x${item.height}px (minimum recommended: 44x44px).`, route, project.name, {
+              type: "small-tap-target",
+              selector: item.selector,
+              width: item.width,
+              height: item.height
+            })
+          );
+        }
+      }
+
+      if (viewportMetrics && viewportMetrics.smallFontCount > 0) {
+        combined.findings.push(
+          makeBrowserFinding("low", "responsive-layout", "Small font sizes on mobile", `${viewportMetrics.smallFontCount} text element(s) have font-size below 12px, which may be hard to read on mobile.`, route, project.name, {
+            type: "small-font",
+            count: viewportMetrics.smallFontCount
           })
         );
       }
@@ -365,7 +490,18 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
         horizontalOverflow: hasHorizontalOverflow,
         accessibilityViolations,
         loginAttempted: loginState.attempted,
-        loginSucceeded: loginState.succeeded
+        loginSucceeded: loginState.succeeded,
+        viewport: viewportMetrics ? {
+          width: viewportMetrics.viewportWidth,
+          height: viewportMetrics.viewportHeight,
+          scrollWidth: viewportMetrics.scrollWidth,
+          scrollHeight: viewportMetrics.scrollHeight,
+          isMobile: viewportMetrics.isMobile,
+          overflowingElements: viewportMetrics.overflowingElements.length,
+          truncatedText: viewportMetrics.truncatedText.length,
+          smallTapTargets: viewportMetrics.smallTapTargets.length,
+          smallFontCount: viewportMetrics.smallFontCount
+        } : null
       });
     }
 

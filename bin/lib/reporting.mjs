@@ -123,7 +123,21 @@ function renderSourceBlock(source) {
   } else if (source.type === "http-error") {
     lines.push(`- **HTTP status**: ${source.statusCode}`);
   } else if (source.type === "layout-overflow") {
-    lines.push(`- **Issue**: Document scroll width exceeds viewport`);
+    lines.push(`- **Scroll width**: ${source.scrollWidth}px → **Viewport**: ${source.viewportWidth}px`);
+    if (source.overflowingElements && source.overflowingElements.length > 0) {
+      lines.push("- **Overflowing elements**:");
+      for (const el of source.overflowingElements) {
+        lines.push(`  - \`${el.selector}\` — overflows by ${el.overflowPx}px (element width: ${el.width}px)`);
+      }
+    }
+  } else if (source.type === "text-truncation") {
+    lines.push(`- **Selector**: \`${source.selector}\``);
+    lines.push(`- **Visible**: ${source.visibleWidth}px → **Content**: ${source.contentWidth}px`);
+  } else if (source.type === "small-tap-target") {
+    lines.push(`- **Selector**: \`${source.selector}\``);
+    lines.push(`- **Size**: ${source.width}x${source.height}px (minimum: 44x44px)`);
+  } else if (source.type === "small-font") {
+    lines.push(`- **Count**: ${source.count} text element(s) below 12px`);
   }
 
   return lines;
@@ -303,10 +317,42 @@ export function renderReport(run) {
     "",
     "## Route Coverage",
     "",
-    ...run.routeSummaries.map(
-      (route) =>
-        `- ${route.browserProject} ${route.route} | status=${route.responseStatus ?? "n/a"} | console=${route.consoleErrors} | failedRequests=${route.failedRequests} | forms=${route.forms} | buttons=${route.buttons} | brokenImages=${route.brokenImages} | overflow=${route.horizontalOverflow ? "yes" : "no"} | a11yViolations=${route.accessibilityViolations}`
-    ),
+    ...run.routeSummaries.flatMap((r) => {
+      const vp = r.viewport;
+      const vpLabel = vp ? `${vp.width}x${vp.height}${vp.isMobile ? " (mobile)" : " (desktop)"}` : "N/A";
+      const lines = [
+        `### ${r.browserProject} — ${r.route}`,
+        "",
+        `| Metric | Value |`,
+        `|---|---|`,
+        `| Title | ${r.title || "(no title)"} |`,
+        `| HTTP Status | ${r.responseStatus ?? "N/A"} |`,
+        `| Viewport | ${vpLabel} |`,
+        `| Scroll Size | ${vp ? `${vp.scrollWidth}x${vp.scrollHeight}` : "N/A"} |`,
+        `| Horizontal Overflow | ${r.horizontalOverflow ? `Yes${vp ? ` (${vp.scrollWidth - vp.width}px)` : ""}` : "No"} |`,
+        `| Console Errors | ${r.consoleErrors} |`,
+        `| Failed Requests | ${r.failedRequests} |`,
+        `| Broken Images | ${r.brokenImages} |`,
+        `| A11y Violations | ${r.accessibilityViolations} |`,
+        `| Forms Detected | ${r.forms} |`,
+        `| Buttons Detected | ${r.buttons} |`,
+      ];
+      if (vp && vp.isMobile) {
+        lines.push(`| Small Tap Targets | ${vp.smallTapTargets} |`);
+        lines.push(`| Small Fonts (<12px) | ${vp.smallFontCount} |`);
+      }
+      if (vp && vp.truncatedText > 0) {
+        lines.push(`| Truncated Text | ${vp.truncatedText} element(s) |`);
+      }
+      if (vp && vp.overflowingElements > 0) {
+        lines.push(`| Overflowing Elements | ${vp.overflowingElements} |`);
+      }
+      if (r.loginAttempted) {
+        lines.push(`| Login Attempted | ${r.loginSucceeded ? "Succeeded" : "Failed"} |`);
+      }
+      lines.push("");
+      return lines;
+    }),
     "",
     "## Findings",
     "",
