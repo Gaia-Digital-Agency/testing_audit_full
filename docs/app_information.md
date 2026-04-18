@@ -1,4 +1,8 @@
-# Quality Tester — App Information
+# App Information
+
+Runtime details, tool selection logic, and execution behavior.
+
+For the file structure and output files, see [`architecture.md`](architecture.md).
 
 ## Architecture Overview
 
@@ -10,37 +14,21 @@ CLI Input → Target Profiling → Enrichment → Orchestration → Execution �
 
 Each stage feeds the next. No manual config files are needed — the app profiles the target and selects tools automatically.
 
-## File Structure
-
-```
-quality_tester/
-├── bin/
-│   ├── qatester.mjs              # Main CLI entry point
-│   └── lib/
-│       ├── available-tools.mjs    # Tool registry (7 tools)
-│       ├── target-profiler.mjs    # Target detection and live enrichment
-│       ├── orchestration.mjs      # Execution plan builder and tool selection
-│       ├── execution.mjs          # Core audit engine (all tool runners)
-│       ├── reporting.mjs          # Report generators (full, ok, errors, PDF)
-│       └── utils.mjs              # Helpers (URL, filesystem, command runner)
-├── src/                           # TypeScript scaffold (future migration target)
-│   ├── cli.ts                     # Type definitions
-│   ├── types.ts                   # Core type system
-│   └── [module]/README.md         # Per-module design notes
-├── tests/
-│   ├── smoke/                     # Playwright smoke test specs
-│   └── full/                      # Playwright full test specs
-├── config/                        # Future config management
-├── docs/                          # Documentation
-├── output/                        # Generated reports (one folder per run)
-└── storage/                       # Crawlee internal state
-```
-
 ## Detailed Flow and Process
 
 ### 1. CLI Input (`bin/qatester.mjs`)
 
-The app starts with `npm run app`. It prompts the developer for 8 inputs via an interactive readline interface. No config files need to be edited.
+The app starts with `npm run app`. It prompts the developer for **5 inputs** via an interactive readline interface:
+
+| # | Prompt | Example |
+|---|---|---|
+| 1 | Project name | `essentialbali` |
+| 2 | URL | `http://example.com` |
+| 3 | SSH command | `ssh azlan@gda-s01` |
+| 4 | Server project path | `/var/www/mysite` |
+| 5 | Mode | `smoke` or `full` |
+
+The SSH command is parsed automatically to extract user and host.
 
 ### 2. Target Profiling (`bin/lib/target-profiler.mjs`)
 
@@ -110,25 +98,7 @@ Runs the selected tools in order. Each tool reports progress via callback as it 
 
 ### 5. Reporting (`bin/lib/reporting.mjs`)
 
-Three report types are generated per run:
-
-#### report-full.md
-Everything — run config, target profile, tool chain, process steps, tool availability, status, progress log, execution summary, route coverage, all findings by severity, and artifact paths.
-
-#### report-ok.md
-Only routes and checks that passed with zero issues. Shows which routes had no console errors, no failed requests, no broken images, no layout overflow, no accessibility violations, and HTTP status < 400.
-
-#### report-errors.md
-Only error findings. Each error includes:
-- Severity level (CRITICAL / HIGH / MEDIUM / LOW)
-- URL where the issue was found
-- Component/area (e.g., accessibility, network, assets, responsive-layout)
-- Detailed description
-
-Also lists all routes that had at least one issue with a breakdown of what went wrong.
-
-#### report-full.pdf
-A basic text-rendered PDF of the full report.
+Six markdown reports + one PDF are generated per run. See [`architecture.md`](architecture.md) for the full output file list.
 
 ## Tool Chain Detail
 
@@ -146,8 +116,7 @@ A basic text-rendered PDF of the full report.
 
 ### Selection Logic by Mode
 
-**Smoke mode** typically selects: axe-core, Lighthouse, Playwright (3-4 tools).
-Crawlee is added if the target is a website or hybrid (not a pure web-app).
+**Smoke mode** typically selects: axe-core, Lighthouse, Playwright (3-4 tools). Crawlee is added if the target is a website or hybrid (not a pure web-app).
 
 **Full mode** adds: Crawlee (always), sitespeed.io (always), plus Puppeteer if the target uses Next.js or mixed rendering.
 
@@ -172,21 +141,3 @@ Crawlee is added if the target is a website or hybrid (not a pure web-app).
 | mobile-webkit | WebKit | iPhone 14 |
 
 Smoke mode uses desktop-chromium and mobile-webkit. Full mode uses all 5.
-
-## Output Structure
-
-Each run creates a timestamped folder:
-
-```
-output/2026-04-12T03-00-00-000Z-myproject-smoke/
-├── report-full.md        # Complete report
-├── report-ok.md          # Passed checks only
-├── report-errors.md      # Errors only with URLs and components
-├── report-full.pdf       # PDF version
-├── screenshots/          # Full-page screenshots per browser per route
-├── lighthouse/           # Lighthouse JSON reports
-├── sitespeed/            # sitespeed.io artifacts (full mode)
-├── crawlee-storage/      # Crawlee internal data
-├── puppeteer-probe.json  # Coverage metadata (when selected)
-└── selenium-probe.json   # Compatibility data (when selected)
-```

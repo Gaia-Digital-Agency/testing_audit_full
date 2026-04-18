@@ -1,99 +1,97 @@
 # Quality Tester
 
-Automated quality testing CLI for websites and web apps. Profiles the target, selects the right tool combination, runs audits, and produces reports — all from one command.
+Automated quality testing CLI for websites and web apps. Profiles the target, selects the right tools, runs audits, and produces reports — all from one command.
 
-Supports React, Next.js, Payload CMS, WordPress, NestJS, Express, and static sites.
+Supports **React, Next.js, Payload CMS, WordPress, NestJS, Express, and static sites.**
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Install browser engines (Chromium, Firefox, WebKit)
+npm run install:browsers
+
+# 3. Run the tester
+npm run app
+```
+
+The CLI will ask you **5 questions**, then run the audit.
+
+---
+
+## The 5 Questions
+
+| # | Prompt | Example |
+|---|---|---|
+| 1 | Project name | `essentialbali` |
+| 2 | URL to test | `http://example.com` |
+| 3 | SSH command | `ssh azlan@gda-s01` |
+| 4 | Server project path | `/var/www/mysite` |
+| 5 | Mode | `smoke` or `full` |
+
+---
+
+## Modes
+
+| Mode | Time | What it does |
+|---|---|---|
+| **smoke** | 3-7 min | Fast release gate — critical routes, console errors, broken assets, a11y, Lighthouse |
+| **full** | 15-35 min | Deep crawl — all routes, all 7 tools, including sitespeed.io performance profiling |
+
+---
+
+## Tools
+
+The tester wires together 7 audit tools:
+
+| Tool | Role |
+|---|---|
+| [Playwright](https://playwright.dev) | Cross-browser automation (Chromium, Firefox, WebKit) |
+| [axe-core](https://github.com/dequelabs/axe-core) | Accessibility (WCAG) |
+| [Lighthouse](https://github.com/GoogleChrome/lighthouse) | Performance, SEO, best practices |
+| [Crawlee](https://crawlee.dev) | Route discovery and crawling |
+| [sitespeed.io](https://www.sitespeed.io) | Extended performance profiling (full mode only) |
+| [Puppeteer](https://pptr.dev) | Chrome-specific diagnostics (JS/CSS coverage) |
+| [Selenium](https://www.selenium.dev) | Compatibility fallback |
+
+---
+
+## Output
+
+Each run creates a timestamped folder in `output/`, e.g. `output/2026-04-18T14-30-00-000Z-mysite-smoke/`:
+
+- **6 Markdown reports** — full, ok-only, errors-only, plus plain-language versions of each
+- **1 PDF report** — full report as PDF
+- **Screenshots** — per browser × per route
+- **Lighthouse JSON** — raw audit data per route
+- **sitespeed.io artifacts** — waterfall + performance (full mode only)
+
+See [`docs/architecture.md`](docs/architecture.md) for the complete output file list.
+
+---
+
+## Documentation
+
+Detailed docs live in [`docs/`](docs/):
+
+| File | What it covers |
+|---|---|
+| [`architecture.md`](docs/architecture.md) | File structure, pipeline flow, and every output file the app generates |
+| [`app_information.md`](docs/app_information.md) | Runtime flow, tool selection logic, browser matrix, severity model |
+| [`test-strategy.md`](docs/test-strategy.md) | Testing strategy, coverage areas, delivery phases |
+| [`bootstrap-structure.md`](docs/bootstrap-structure.md) | Original scaffold plan (historical reference) |
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
 | Runtime | Node.js >= 20 (ESM) |
-| Language | JavaScript (ES2022) with TypeScript scaffold |
+| Language | JavaScript (ES2022) |
 | Browser Engines | Chromium, Firefox, WebKit (via Playwright) |
 | Package Manager | npm |
-
-## Tools Used
-
-| Tool | Purpose |
-|---|---|
-| [Playwright](https://playwright.dev) | Cross-browser automation — drives Chromium, Firefox, and WebKit across desktop and mobile viewports |
-| [axe-core](https://github.com/dequelabs/axe-core) | Accessibility auditing — WCAG rule checks embedded inside rendered page flows |
-| [Lighthouse](https://github.com/GoogleChrome/lighthouse) | Quality scoring — performance, accessibility, best practices, and SEO budgets |
-| [Crawlee](https://crawlee.dev) | Route discovery — recursive crawling, sitemap ingestion, internal link traversal |
-| [sitespeed.io](https://www.sitespeed.io) | Performance profiling — waterfall analysis, regression detection, extended metrics |
-| [Puppeteer](https://pptr.dev) | Chrome-specific instrumentation — JS/CSS coverage, CDP-level diagnostics |
-| [Selenium](https://www.selenium.dev) | Compatibility fallback — remote grid and legacy browser support |
-| [chrome-launcher](https://github.com/AuxinJeron/chrome-launcher) | Chrome process management for Lighthouse audits |
-
-## Quick Start
-
-```bash
-# Install dependencies
-npm install
-
-# Install browser engines (Chromium, Firefox, WebKit)
-npm run install:browsers
-
-# Run the tester
-npm run app
-```
-
-## Input
-
-When you run `npm run app`, the CLI asks 5 questions:
-
-```
-════════════════════════════════════════════════════════
-  QUALITY TESTER
-════════════════════════════════════════════════════════
-
-  Project name           : essentialbali
-  URL                    : http://essentialbali.gaiada.online/
-  SSH command            : ssh azlan@gda-s01
-  Server project path    : /var/www/essentialbali
-  Mode (smoke / full)    : smoke
-```
-
-| # | Prompt | Example | Description |
-|---|---|---|---|
-| 1 | Project name | `essentialbali` | Label for run folder and reports |
-| 2 | URL | `http://example.com` | Public URL to test |
-| 3 | SSH command | `ssh azlan@gda-s01` | Your working SSH command (user@host parsed automatically) |
-| 4 | Server project path | `/var/www/mysite` | Path to project files on the server |
-| 5 | Mode | `smoke` or `full` | smoke = fast gate, full = deep crawl |
-
-## Modes
-
-- **smoke** — Fast release gate. Checks critical routes, console errors, broken assets, accessibility, and Lighthouse scores. Runs in ~3-7 minutes.
-- **full** — Deep crawl and audit. Discovers all routes, runs all 7 tools including sitespeed.io performance profiling. Runs in ~15-35 minutes.
-
-## Tool Chain (lightest to heaviest)
-
-| # | Tool | Weight | Role |
-|---|---|---|---|
-| 1 | axe-core | Lightest | Accessibility rules inside page flows |
-| 2 | Crawlee | Light | Route discovery and crawling |
-| 3 | Lighthouse | Moderate | Performance, SEO, best practices |
-| 4 | Playwright | Medium | Cross-browser automation backbone |
-| 5 | Puppeteer | Moderate-heavy | Chrome-specific instrumentation |
-| 6 | Selenium | Heavy | Compatibility fallback |
-| 7 | sitespeed.io | Heaviest | Extended performance profiling |
-
-## Output
-
-Each run creates a timestamped folder in `output/` (e.g. `output/2026-04-12T03-00-00-000Z-myproject-smoke/`):
-
-| File | What it contains |
-|---|---|
-| `report-full.md` | Complete report — run config, target profile, tool chain used, process steps, progress log, execution metrics, route-by-route coverage, all findings sorted by severity, and artifact paths |
-| `report-ok.md` | Passed-only view — lists every route and check that completed with zero issues (no console errors, no failed requests, no broken images, no layout overflow, no accessibility violations, HTTP < 400) |
-| `report-errors.md` | Errors-only view — each finding with severity (CRITICAL/HIGH/MEDIUM/LOW), the URL where it was found, the component/area affected, and a description of the issue |
-| `report-full.pdf` | PDF version of the full report |
-| `screenshots/` | Full-page screenshots captured per browser engine per route |
-| `lighthouse/` | Raw Lighthouse JSON reports per audited route |
-| `sitespeed/` | sitespeed.io waterfall and performance artifacts (full mode only) |
-
-## More Information
-
-See [`docs/app_information.md`](docs/app_information.md) for architecture, file structure, detailed flow, and tool selection logic.

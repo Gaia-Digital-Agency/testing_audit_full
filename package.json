@@ -6,8 +6,8 @@
   "scripts": {
     "app": "node ./bin/qatester.mjs",
     "install:browsers": "npx playwright install chromium firefox webkit",
-    "test:smoke": "playwright test --config=playwright.config.ts --project=desktop-chromium tests/smoke",
-    "test:full": "playwright test --config=playwright.config.ts tests/full",
+    "test:smoke": "playwright test --config=tests/playwright.config.ts --project=desktop-chromium smoke",
+    "test:full": "playwright test --config=tests/playwright.config.ts full",
     "report:sample": "node -e \"console.log('Report generation will be wired in implementation phase.')\""
   },
   "dependencies": {
