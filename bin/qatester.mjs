@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { profileTarget } from "./lib/target-profiler.mjs";
 import { buildExecutionPlan } from "./lib/orchestration.mjs";
-import { buildSimplePdf, renderReport, renderOkReport, renderErrorsReport } from "./lib/reporting.mjs";
+import { renderReport, renderOkReport, renderErrorsReport, renderEasyReadErrors, renderEasyReadGood, renderEasyReadReport } from "./lib/reporting.mjs";
 import { enrichTargetProfile } from "./lib/target-profiler.mjs";
 import { executeAuditPlan } from "./lib/execution.mjs";
 import { sanitizeSegment } from "./lib/utils.mjs";
@@ -107,7 +107,7 @@ async function main() {
   const startedAt = new Date().toISOString();
   const run = await promptForRun();
   const timestamp = startedAt.replace(/[:.]/g, "-");
-  const folderName = `${timestamp}-${sanitizeSegment(run.projectName)}-${run.mode}`;
+  const folderName = `${sanitizeSegment(run.projectName)}-${run.mode}-${timestamp}`;
   const outputDir = path.resolve(process.cwd(), "output");
   const runDir = path.join(outputDir, folderName);
 
@@ -147,31 +147,40 @@ async function main() {
     completedAt: finalCompletedAt
   };
 
-  // Generate 3 report types
+  // Generate 6 report types
   const fullReport = renderReport(reportData);
-  const okReport = renderOkReport(reportData);
+  const goodReport = renderOkReport(reportData);
   const errorsReport = renderErrorsReport(reportData);
+  const easyReadErrorReport = renderEasyReadErrors(reportData);
+  const easyReadGoodReport = renderEasyReadGood(reportData);
+  const easyReadCombinedReport = renderEasyReadReport(reportData);
 
   const reportFullPath = path.join(runDir, "report-full.md");
-  const reportOkPath = path.join(runDir, "report-ok.md");
+  const reportGoodPath = path.join(runDir, "report-good.md");
   const reportErrorsPath = path.join(runDir, "report-errors.md");
-  const reportPdfPath = path.join(runDir, "report-full.pdf");
+  const easyReadErrorPath = path.join(runDir, "easy_read_error.md");
+  const easyReadGoodPath = path.join(runDir, "easy_read_good.md");
+  const easyReadReportPath = path.join(runDir, "easy_read_report.md");
 
   await Promise.all([
     writeFile(reportFullPath, fullReport, "utf8"),
-    writeFile(reportOkPath, okReport, "utf8"),
+    writeFile(reportGoodPath, goodReport, "utf8"),
     writeFile(reportErrorsPath, errorsReport, "utf8"),
-    writeFile(reportPdfPath, buildSimplePdf(fullReport), "utf8")
+    writeFile(easyReadErrorPath, easyReadErrorReport, "utf8"),
+    writeFile(easyReadGoodPath, easyReadGoodReport, "utf8"),
+    writeFile(easyReadReportPath, easyReadCombinedReport, "utf8")
   ]);
 
   stdout.write("\n════════════════════════════════════════════════════════\n");
   stdout.write("  REPORTS\n");
   stdout.write("════════════════════════════════════════════════════════\n");
-  stdout.write(`  Run folder : ${runDir}\n`);
-  stdout.write(`  Full report: ${reportFullPath}\n`);
-  stdout.write(`  OK only    : ${reportOkPath}\n`);
-  stdout.write(`  Errors only: ${reportErrorsPath}\n`);
-  stdout.write(`  PDF        : ${reportPdfPath}\n`);
+  stdout.write(`  Run folder      : ${runDir}\n`);
+  stdout.write(`  Full report     : ${reportFullPath}\n`);
+  stdout.write(`  Good only       : ${reportGoodPath}\n`);
+  stdout.write(`  Errors only     : ${reportErrorsPath}\n`);
+  stdout.write(`  Easy-read errors: ${easyReadErrorPath}\n`);
+  stdout.write(`  Easy-read good  : ${easyReadGoodPath}\n`);
+  stdout.write(`  Easy-read report: ${easyReadReportPath}\n`);
   stdout.write("════════════════════════════════════════════════════════\n\n");
 }
 

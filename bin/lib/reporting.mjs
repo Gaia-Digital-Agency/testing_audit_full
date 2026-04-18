@@ -276,6 +276,138 @@ function severityBadge(severity) {
   return badges[severity] || severity.toUpperCase();
 }
 
+// ── Easy-Read Errors Report ─────────────────────────────────────────────
+export function renderEasyReadErrors(run) {
+  const errorSeverities = new Set(["critical", "high", "medium", "low"]);
+  const rawFindings = [...run.findings]
+    .filter((f) => errorSeverities.has(f.severity))
+    .sort((a, b) => {
+      const rank = { critical: 0, high: 1, medium: 2, low: 3 };
+      return (rank[a.severity] - rank[b.severity]) || (a.route || "").localeCompare(b.route || "");
+    });
+
+  const dedupedFindings = deduplicateFindings(rawFindings);
+
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const f of dedupedFindings) counts[f.severity] += 1;
+
+  const lines = [
+    `# ${run.projectName} — Quick Error Summary`,
+    "",
+    `**Mode**: \`${run.mode}\` | **URL**: ${run.baseUrl} | **Date**: ${run.startedAt.split("T")[0]}`,
+    "",
+    `> **${dedupedFindings.length} issues found** — ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low`,
+    "",
+  ];
+
+  if (dedupedFindings.length === 0) {
+    lines.push("All checks passed. No errors found.", "");
+    return lines.join("\n");
+  }
+
+  for (const f of dedupedFindings) {
+    const browsers = f.browsers ? f.browsers.join(", ") : "all";
+    lines.push(`- ${severityBadge(f.severity)} **${f.title}** — ${f.details.slice(0, 120)}${f.details.length > 120 ? "..." : ""}`);
+    lines.push(`  _${f.area}_ | ${f.route || "global"} | ${browsers}`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+// ── Easy-Read Good Report ───────────────────────────────────────────────
+export function renderEasyReadGood(run) {
+  const okRoutes = run.routeSummaries.filter(
+    (r) =>
+      r.consoleErrors === 0 &&
+      r.failedRequests === 0 &&
+      r.brokenImages === 0 &&
+      !r.horizontalOverflow &&
+      r.accessibilityViolations === 0 &&
+      (r.responseStatus === null || r.responseStatus < 400)
+  );
+
+  const totalRoutes = run.routeSummaries.length;
+
+  const lines = [
+    `# ${run.projectName} — Quick Good Summary`,
+    "",
+    `**Mode**: \`${run.mode}\` | **URL**: ${run.baseUrl} | **Date**: ${run.startedAt.split("T")[0]}`,
+    "",
+    `> **${okRoutes.length} / ${totalRoutes} routes passed** all checks with zero issues`,
+    "",
+  ];
+
+  if (okRoutes.length === 0) {
+    lines.push("No routes passed all checks without issues.", "");
+    return lines.join("\n");
+  }
+
+  for (const r of okRoutes) {
+    lines.push(`- ${r.browserProject} **${r.route}** — status ${r.responseStatus ?? "n/a"} | ${r.title || "(no title)"}`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+// ── Easy-Read Combined Report ───────────────────────────────────────────
+export function renderEasyReadReport(run) {
+  const errorSeverities = new Set(["critical", "high", "medium", "low"]);
+  const rawFindings = [...run.findings]
+    .filter((f) => errorSeverities.has(f.severity))
+    .sort((a, b) => {
+      const rank = { critical: 0, high: 1, medium: 2, low: 3 };
+      return (rank[a.severity] - rank[b.severity]) || (a.route || "").localeCompare(b.route || "");
+    });
+  const dedupedFindings = deduplicateFindings(rawFindings);
+
+  const okRoutes = run.routeSummaries.filter(
+    (r) =>
+      r.consoleErrors === 0 &&
+      r.failedRequests === 0 &&
+      r.brokenImages === 0 &&
+      !r.horizontalOverflow &&
+      r.accessibilityViolations === 0 &&
+      (r.responseStatus === null || r.responseStatus < 400)
+  );
+  const totalRoutes = run.routeSummaries.length;
+
+  const lines = [
+    `# ${run.projectName} — Quick Report`,
+    "",
+    `${run.mode} | ${run.baseUrl} | ${run.startedAt.split("T")[0]}`,
+    "",
+    "---",
+    "",
+    `## ❌ Fix (${dedupedFindings.length} issues)`,
+    "",
+  ];
+
+  if (dedupedFindings.length === 0) {
+    lines.push("None — all checks passed!", "");
+  } else {
+    for (const f of dedupedFindings) {
+      lines.push(`- ${severityBadge(f.severity)} **${f.title}** — ${f.route || "global"}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("---", "");
+  lines.push(`## ✅ Good (${okRoutes.length} / ${totalRoutes} routes clean)`, "");
+
+  if (okRoutes.length === 0) {
+    lines.push("No routes passed all checks.", "");
+  } else {
+    for (const r of okRoutes) {
+      lines.push(`- **${r.route}** — ${r.browserProject} | ${r.responseStatus ?? "n/a"}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
 // ── Full Report ─────────────────────────────────────────────────────────
 export function renderReport(run) {
   const selectedTools = run.executionPlan.selectedTools.filter((tool) => tool.selected).map((tool) => tool.name);

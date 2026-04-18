@@ -204,12 +204,36 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
 
       page.on("console", (message) => {
         if (message.type() === "error") {
-          consoleErrors.push(message.text());
+          const text = message.text();
+          // Filter out normal Next.js RSC navigation fallback messages
+          if (text.includes("Failed to fetch RSC payload") && text.includes("Falling back to browser navigation")) return;
+          consoleErrors.push(text);
         }
       });
 
       page.on("requestfailed", (request) => {
-        failedRequests.push(`${request.method()} ${request.url()} (${request.failure()?.errorText || "unknown"})`);
+        const url = request.url();
+        const errorText = request.failure()?.errorText || "unknown";
+        const resourceType = request.resourceType();
+
+        // Filter out common noise:
+        // 1. Cancelled image loads are normal lazy-loading/navigation behavior
+        // 2. ERR_ABORTED on scripts/stylesheets often means stale cached chunks after a deploy
+        // 3. "Load request cancelled" on WebKit is normal for off-screen resources
+        const isCancelledImage = resourceType === "image" && (errorText.includes("cancelled") || errorText === "net::ERR_ABORTED");
+        const isCancelledByNavigation = errorText.includes("cancelled") || errorText.includes("net::ERR_ABORTED");
+        const isStaleChunk = url.includes("/_next/static/chunks/") && errorText === "net::ERR_ABORTED";
+        const isRscPrefetch = url.includes("_rsc=") && errorText === "net::ERR_ABORTED";
+        const isApiAborted = (url.includes("/api/") && errorText === "net::ERR_ABORTED");
+
+        if (isCancelledImage || isStaleChunk || isRscPrefetch || isApiAborted) {
+          // Downgrade: track as info but don't report as high-severity finding
+          return;
+        }
+
+        // For other aborted non-document requests, downgrade severity
+        const severity = isCancelledByNavigation && resourceType !== "document" ? "medium" : "high";
+        failedRequests.push({ detail: `${request.method()} ${url} (${errorText})`, severity, resourceType });
       });
 
       let responseStatus = null;
@@ -233,7 +257,15 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
         buttonCount = await page.locator("button, input[type='submit'], input[type='button']").count();
         brokenImageDetails = await page.$$eval("img", (images) =>
           images
-            .filter((image) => !image.complete || image.naturalWidth === 0)
+            .filter((image) => {
+              // Skip lazy-loaded images that haven't loaded yet — they're not broken
+              if (image.loading === "lazy" && !image.complete) return false;
+              // Skip images with no src (decorative/placeholder)
+              if (!image.src && !image.getAttribute("src")) return false;
+              // Skip tiny tracking pixels
+              if (image.width <= 1 || image.height <= 1) return false;
+              return !image.complete || image.naturalWidth === 0;
+            })
             .slice(0, 10)
             .map((image) => ({
               src: image.src || image.getAttribute("src") || "(empty)",
@@ -365,7 +397,20 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
 
         const screenshotName = `${project.name}-${routes.indexOf(route) + 1}.png`;
         const screenshotPath = path.join(screenshotsDir, screenshotName);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+        } catch (ssErr) {
+          // Full-page screenshot may exceed browser limits on very tall pages.
+          // Fall back to a viewport-only screenshot instead of failing the route.
+          try {
+            await page.screenshot({ path: screenshotPath, fullPage: false });
+          } catch { /* ignore if even viewport screenshot fails */ }
+          if (String(ssErr).includes("32767")) {
+            combined.findings.push(
+              makeBrowserFinding("low", "responsive-layout", "Page too tall for full-page screenshot", "Page height exceeds 32767px browser limit. Viewport-only screenshot was captured instead.", route, project.name, { type: "screenshot-overflow" })
+            );
+          }
+        }
         combined.artifacts.push(screenshotPath);
       } catch (error) {
         combined.findings.push(
@@ -408,9 +453,11 @@ async function runPlaywrightAndAxe(run, profile, selectedTools, runDir, routes) 
       }
 
       if (failedRequests.length > 0) {
-        for (const reqDetail of failedRequests.slice(0, 10)) {
+        for (const req of failedRequests.slice(0, 10)) {
+          const reqDetail = typeof req === "string" ? req : req.detail;
+          const severity = typeof req === "string" ? "high" : req.severity;
           combined.findings.push(
-            makeBrowserFinding("high", "network", "Failed network request", reqDetail, route, project.name, {
+            makeBrowserFinding(severity, "network", "Failed network request", reqDetail, route, project.name, {
               type: "network-failure",
               request: reqDetail
             })
@@ -623,14 +670,23 @@ async function runSitespeedAudit(run, runDir) {
 }
 
 async function runPuppeteerProbe(run, runDir) {
-  const puppeteer = await import("puppeteer");
+  let puppeteer;
+  try {
+    puppeteer = await import("puppeteer");
+  } catch {
+    return {
+      findings: [makeFinding("low", "runtime", "Puppeteer not available", "Puppeteer module could not be loaded. Run: npm install puppeteer && npx puppeteer browsers install chrome", run.baseUrl)],
+      artifacts: [],
+      note: null
+    };
+  }
   const artifactPath = path.join(runDir, "puppeteer-probe.json");
   let browser;
 
   try {
     browser = await puppeteer.default.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"]
+      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
     });
     const page = await browser.newPage();
     await page.goto(run.baseUrl, { waitUntil: "networkidle2", timeout: 60_000 });
